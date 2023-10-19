@@ -7,7 +7,7 @@ terraform {
   }
 }
 
-#### Note - We need to setup Azure Key Vault proper access policies to allow your Terraform script to access these secrets #####
+####Note - We need to setup Azure Key Vault proper access policies to allow your Terraform script to access these secrets#####
 
 provider "azurerm" {
   features {}
@@ -123,6 +123,28 @@ resource "azurerm_linux_virtual_machine" "exp6" {
   }
 
   os_profile_linux_config {
-    disable_password_authentication = false
+    disable_password_authentication = true
+  }
+}
+
+####Note - Create SSH Key Pair on local system and Store the SSH Private Key in Azure Key Vault with the correct valut access policy so that terrafrom can use it###
+
+  provisioner "remote-exec" "exp7" {
+    inline = [
+      "sudo apt-get update -y",
+      "sudo apt-get install -y docker.io",
+      "sudo systemctl start docker",
+      "sudo systemctl enable docker",
+      "sudo curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3",
+      "chmod 700 get_helm.sh",
+      "sudo ./get_helm.sh",
+    ]
+  }
+
+  connection {
+    type        = "ssh"
+    host        = VM_public_ip_address ##refer to Exp5##
+    user        = data.azurerm_key_vault_secret.admin_username.value
+    private_key = data.azurerm_key_vault_secret.ssh_private_key.value
   }
 }
