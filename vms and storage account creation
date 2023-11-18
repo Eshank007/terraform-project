@@ -1,0 +1,153 @@
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = ">= 1.0"
+    }
+  }
+}
+
+provider "azurerm" {
+  features {}
+  skip_provider_registration = true
+  client_id       = "4007f70b-451c-40ae-8b9d-602354c01964"
+  client_secret   = "Liz8Q~sZ3B9oy1EKQz8i-vTGETVHpxiJj4Wx0cNL"
+  tenant_id       = "b41b72d0-4e9f-4c26-8a69-f949f367c91d"
+  subscription_id = "297c4e9f-28e6-4778-ad07-a716ff83d66c"
+}
+
+resource "azurerm_resource_group" "rg1" {
+  name     = var.resource_group_name
+  location = var.resource_group_location
+}
+
+resource "azurerm_resource_group" "mytestrgo0o7" {
+  name     = data.azurerm_key_vault_secret.rgname01.value
+  location = data.azurerm_key_vault_secret.rglocation02.value
+}
+
+resource "azurerm_storage_account" "sa1" {
+  name                = var.storage_name
+  location            = azurerm_resource_group.rg1.location
+  resource_group_name = azurerm_resource_group.rg1.name
+  account_tier        = "Standard"
+  account_replication_type = "LRS"
+  depends_on          = [azurerm_resource_group.rg1]
+}
+
+resource "azurerm_storage_container" "tf3" {
+  name                 = var.container_name
+  storage_account_name = azurerm_storage_account.sa1.name
+  container_access_type = "private"
+  depends_on = [ azurerm_storage_account.sa1 ]
+}
+
+locals {
+  resource_group = "rajrg"
+  location = "eastus"
+}
+
+resource "azurerm_resource_group" "rg10" {
+  name     = local.resource_group
+  location = local.location
+}
+
+resource "azurerm_virtual_network" "vnet" {
+  name                = "myvnet"
+  location            = local.location
+  resource_group_name = local.resource_group
+  address_space       = ["10.0.0.0/16"]
+  depends_on = [ azurerm_resource_group.rg10 ]
+}
+
+resource "azurerm_subnet" "subneta" {
+  name                 = "mysubnet"
+  resource_group_name  = local.resource_group
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = ["10.0.1.0/24"]
+  depends_on           = [azurerm_virtual_network.vnet, azurerm_resource_group.rg10]
+}
+
+resource "azurerm_public_ip" "pip" {
+  name                = "vmpip"
+  resource_group_name = local.resource_group
+  location            = local.location
+  allocation_method   = "Static"
+  sku                 = "Standard"
+  depends_on = [ azurerm_resource_group.rg10 ]
+}
+
+resource "azurerm_network_interface" "nic" {
+  name                = "vmnic"
+  location            = local.location
+  resource_group_name = local.resource_group
+
+  ip_configuration {
+    name                          = "my_nic_configuration"
+    subnet_id                     =  azurerm_subnet.subneta.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          =  azurerm_public_ip.pip.id
+  }
+  depends_on = [ azurerm_virtual_network.vnet, azurerm_subnet.subneta, azurerm_public_ip.pip, azurerm_resource_group.rg10 ]
+}
+
+resource "azurerm_network_security_group" "nsg" {
+  name                = "mynsg"
+  location            = local.location
+  resource_group_name = local.resource_group
+
+  security_rule {
+    name                       = "myrdp"
+    priority                   =  101
+    protocol                   = "Tcp"
+    direction                  = "Inbound"
+    access                     = "Allow"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+    source_port_range          = "*"
+    destination_port_range     = "3389"
+  }
+  security_rule {
+    name                       = "allow-http"
+    priority                   =  102
+    protocol                   = "Tcp"
+    direction                  = "Inbound"
+    access                     = "Allow"
+    source_address_prefix      = "*"
+    destination_address_prefix = "*"
+    source_port_range          = "*"
+    destination_port_range     = "80"
+  }
+  depends_on = [ azurerm_resource_group.rg10, azurerm_network_interface.nic ]
+}
+
+resource "azurerm_subnet_network_security_group_association" "nsgass" {
+  subnet_id                   = azurerm_subnet.subneta.id
+  network_security_group_id  = azurerm_network_security_group.nsg.id
+  depends_on                 = [azurerm_network_security_group.nsg]
+}
+
+
+resource "azurerm_windows_virtual_machine" "vm" {
+  name                  = "myappvm"
+  admin_username        = "demouser"
+  admin_password        = data.azurerm_key_vault_secret.vmpass.value
+  location              = local.location
+  resource_group_name   = local.resource_group
+  network_interface_ids = [azurerm_network_interface.nic.id]
+  size                  = "Standard_DS1_v2"
+
+  os_disk {
+    name                 = "myOsDisk"
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "MicrosoftWindowsServer"
+    offer     = "WindowsServer"
+    sku       = "2019-datacenter"
+    version   = "latest"
+  }
+  depends_on = [ azurerm_network_interface.nic, azurerm_resource_group.rg10 ]
+}
